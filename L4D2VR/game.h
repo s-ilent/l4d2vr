@@ -4,8 +4,9 @@
 #include <array>
 #include <string>
 #include <cstdarg>
-#include "vector.h"
 #include <Windows.h>
+
+#include "vector.h"
 
 // === Forward Declarations for Engine Interfaces ===
 class IClientEntityList;
@@ -13,7 +14,6 @@ class IEngineTrace;
 class IEngineClient;
 class IMaterialSystem;
 class IBaseClientDLL;
-class IViewRender;
 class IModelInfo;
 class IModelRender;
 class IMaterial;
@@ -32,78 +32,77 @@ class Hooks;
 // === Global Game Instance ===
 inline Game* g_Game = nullptr;
 
-// === Per-Player VR Info ===
+// === Per-Player VR State ===
 struct Player
 {
     C_BasePlayer* pPlayer = nullptr;
     bool isUsingVR = false;
-    QAngle controllerAngle = { 0.f, 0.f, 0.f };
+
     Vector controllerPos = { 0.f, 0.f, 0.f };
+    QAngle controllerAngle = { 0.f, 0.f, 0.f };
+    QAngle prevControllerAngle = { 0.f, 0.f, 0.f };
+
     bool isMeleeing = false;
     bool isNewSwing = false;
-    QAngle prevControllerAngle = { 0.f, 0.f, 0.f };
 };
 
-// === Game System ===
+// === Main Game System ===
 class Game
 {
 public:
-    // Engine Interfaces
+    // === Engine Interfaces ===
     IClientEntityList* m_ClientEntityList = nullptr;
     IEngineTrace* m_EngineTrace = nullptr;
     IEngineClient* m_EngineClient = nullptr;
     IMaterialSystem* m_MaterialSystem = nullptr;
     IBaseClientDLL* m_BaseClientDll = nullptr;
-    //IViewRender* m_ClientViewRender = nullptr;
-    //IViewRender* m_EngineViewRender = nullptr;
     IModelInfo* m_ModelInfo = nullptr;
     IModelRender* m_ModelRender = nullptr;
     IInput* m_VguiInput = nullptr;
     ISurface* m_VguiSurface = nullptr;
 
-    // Module Bases
+    // === Module Base Addresses ===
     uintptr_t m_BaseEngine = 0;
     uintptr_t m_BaseClient = 0;
     uintptr_t m_BaseServer = 0;
     uintptr_t m_BaseMaterialSystem = 0;
     uintptr_t m_BaseVgui2 = 0;
 
-    // Core systems
+    // === Internal Systems ===
     Offsets* m_Offsets = nullptr;
     VR* m_VR = nullptr;
     Hooks* m_Hooks = nullptr;
 
+    // === State Flags ===
     bool m_Initialized = false;
-
-    // VR player states
-    std::array<Player, 24> m_PlayersVRInfo;
-    int m_CurrentUsercmdID = -1;
     bool m_PerformingMelee = false;
+    int m_CurrentUsercmdID = -1;
 
-    // Cached models/materials
+    // === Player VR State (Multiplayer) ===
+    std::array<Player, 24> m_PlayersVRInfo;
+
+    // === Weapon / Viewmodel State ===
+    bool m_IsMeleeWeaponActive = false;
+    bool m_SwitchedWeapons = false;
     model_t* m_ArmsModel = nullptr;
     IMaterial* m_ArmsMaterial = nullptr;
     bool m_CachedArmsModel = false;
 
-    // Weapon state
-    bool m_IsMeleeWeaponActive = false;
-    bool m_SwitchedWeapons = false;
-
     // === Constructor ===
     Game();
 
-    // === Interface Retrieval ===
+    // === Interface Utilities ===
     void* GetInterface(const char* dllname, const char* interfacename);
+    CBaseEntity* GetClientEntity(int entityIndex);
+    char* getNetworkName(uintptr_t* entity);
+
+    // === Command Execution ===
+    void ClientCmd(const char* szCmdString);
+    void ClientCmd_Unrestricted(const char* szCmdString);
 
     // === Logging ===
     static void logMsg(const char* fmt, ...);
     static void errorMsg(const char* msg);
-
-    // === Utility ===
-    CBaseEntity* GetClientEntity(int entityIndex);
-    char* getNetworkName(uintptr_t* entity);
-    void ClientCmd(const char* szCmdString);
-    void ClientCmd_Unrestricted(const char* szCmdString);
 };
 
 // === Logging Macros (Debug Only) ===
