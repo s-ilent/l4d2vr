@@ -1,82 +1,189 @@
 #include "game.h"
 #include <Windows.h>
 #include <iostream>
+#include <unordered_map>
+#include <cstdarg>
+#include <cstdio>
+#include <chrono>
+#include <ctime>
+#include <mutex>
+
 #include "sdk.h"
 #include "vr.h"
 #include "hooks.h"
 #include "offsets.h"
 #include "sigscanner.h"
 
+static std::mutex logMutex;
+using tCreateInterface = void* (__cdecl*)(const char* name, int* returnCode);
+
+// === Utility: Retry module load with logging ===
+static HMODULE GetModuleWithRetry(const char* dllname, int maxTries = 100, int delayMs = 50)
+{
+    for (int i = 0; i < maxTries; ++i)
+    {
+        HMODULE handle = GetModuleHandleA(dllname);
+        if (handle)
+            return handle;
+
+        Game::logMsg("Waiting for module to load: %s (attempt %d)", dllname, i + 1);
+        Sleep(delayMs);
+    }
+
+    Game::errorMsg(("Failed to load module after retrying: " + std::string(dllname)).c_str());
+    return nullptr;
+}
+
+// === Utility: Safe interface fetch with static cache ===
+static void* GetInterfaceSafe(const char* dllname, const char* interfacename)
+{
+    static std::unordered_map<std::string, void*> cache;
+
+    std::string key = std::string(dllname) + "::" + interfacename;
+    auto it = cache.find(key);
+    if (it != cache.end())
+        return it->second;
+
+    HMODULE mod = GetModuleWithRetry(dllname);
+    if (!mod)
+        return nullptr;
+
+    auto CreateInterface = reinterpret_cast<tCreateInterface>(GetProcAddress(mod, "CreateInterface"));
+    if (!CreateInterface)
+    {
+        Game::errorMsg(("CreateInterface not found in " + std::string(dllname)).c_str());
+        return nullptr;
+    }
+
+    int returnCode = 0;
+    void* iface = CreateInterface(interfacename, &returnCode);
+    if (!iface)
+    {
+        Game::errorMsg(("Interface not found: " + std::string(interfacename)).c_str());
+        return nullptr;
+    }
+
+    cache[key] = iface;
+    return iface;
+}
+
+// === Game Constructor ===
 Game::Game()
 {
-    while (!(m_BaseClient = (uintptr_t)GetModuleHandle("client.dll")))
-        Sleep(50);
-    while (!(m_BaseEngine = (uintptr_t)GetModuleHandle("engine.dll")))
-        Sleep(50);
-    while (!(m_BaseMaterialSystem = (uintptr_t)GetModuleHandle("MaterialSystem.dll")))
-        Sleep(50);
-    while (!(m_BaseServer = (uintptr_t)GetModuleHandle("server.dll")))
-        Sleep(50);
-    while (!(m_BaseVgui2 = (uintptr_t)GetModuleHandle("vgui2.dll")))
-        Sleep(50);
+    m_BaseClient = reinterpret_cast<uintptr_t>(GetModuleWithRetry("client.dll"));
+    m_BaseEngine = reinterpret_cast<uintptr_t>(GetModuleWithRetry("engine.dll"));
+    m_BaseMaterialSystem = reinterpret_cast<uintptr_t>(GetModuleWithRetry("MaterialSystem.dll"));
+    m_BaseServer = reinterpret_cast<uintptr_t>(GetModuleWithRetry("server.dll"));
+    m_BaseVgui2 = reinterpret_cast<uintptr_t>(GetModuleWithRetry("vgui2.dll"));
 
-    m_ClientEntityList = (IClientEntityList *)GetInterface("client.dll", "VClientEntityList003");
-    m_EngineTrace = (IEngineTrace *)GetInterface("engine.dll", "EngineTraceClient003");
-    m_EngineClient = (IEngineClient *)GetInterface("engine.dll", "VEngineClient013");
-    m_MaterialSystem = (IMaterialSystem *)GetInterface("MaterialSystem.dll", "VMaterialSystem080");
-    m_ClientViewRender = (IViewRender *)GetInterface("client.dll", "VEngineRenderView013");
-    m_EngineViewRender = (IViewRender *)GetInterface("engine.dll", "VEngineRenderView013");
-    m_ModelInfo = (IModelInfo *)GetInterface("engine.dll", "VModelInfoClient004");
-    m_ModelRender = (IModelRender *)GetInterface("engine.dll", "VEngineModel016");
-    m_VguiInput = (IInput *)GetInterface("vgui2.dll", "VGUI_InputInternal001");
-    m_VguiSurface = (ISurface *)GetInterface("vguimatsurface.dll", "VGUI_Surface031");
+    m_ClientEntityList = static_cast<IClientEntityList*>(GetInterfaceSafe("client.dll", "VClientEntityList003"));
+    m_EngineTrace = static_cast<IEngineTrace*>(GetInterfaceSafe("engine.dll", "EngineTraceClient003"));
+    m_EngineClient = static_cast<IEngineClient*>(GetInterfaceSafe("engine.dll", "VEngineClient013"));
+    m_MaterialSystem = static_cast<IMaterialSystem*>(GetInterfaceSafe("MaterialSystem.dll", "VMaterialSystem080"));
+    m_ModelInfo = static_cast<IModelInfo*>(GetInterfaceSafe("engine.dll", "VModelInfoClient004"));
+    m_ModelRender = static_cast<IModelRender*>(GetInterfaceSafe("engine.dll", "VEngineModel016"));
+    m_VguiInput = static_cast<IInput*>(GetInterfaceSafe("vgui2.dll", "VGUI_InputInternal001"));
+    m_VguiSurface = static_cast<ISurface*>(GetInterfaceSafe("vguimatsurface.dll", "VGUI_Surface031"));
 
     m_Offsets = new Offsets();
     m_VR = new VR(this);
     m_Hooks = new Hooks(this);
 
     m_Initialized = true;
+
+    Game::logMsg("Game initialized successfully.");
 }
 
-void *Game::GetInterface(const char *dllname, const char *interfacename)
+// === Fallback Interface ===
+void* Game::GetInterface(const char* dllname, const char* interfacename)
 {
-    tCreateInterface CreateInterface = (tCreateInterface)GetProcAddress(GetModuleHandle(dllname), "CreateInterface");
-
-    int returnCode = 0;
-    void *createdInterface = CreateInterface(interfacename, &returnCode);
-
-    return createdInterface;
+    Game::logMsg("Fallback GetInterface called for %s::%s", dllname, interfacename);
+    return GetInterfaceSafe(dllname, interfacename);
 }
 
-void Game::errorMsg(const char *msg)
+// === Thread-safe Log Message with Timestamp ===
+void Game::logMsg(const char* fmt, ...)
 {
-    MessageBox(0, msg, "L4D2VR", MB_ICONERROR | MB_OK);
+    std::lock_guard<std::mutex> lock(logMutex);
+
+    auto now = std::chrono::system_clock::now();
+    std::time_t now_c = std::chrono::system_clock::to_time_t(now);
+    char timebuf[20] = {};
+    std::strftime(timebuf, sizeof(timebuf), "%Y-%m-%d %H:%M:%S", std::localtime(&now_c));
+
+    printf("[%s] ", timebuf);
+
+    va_list args;
+    va_start(args, fmt);
+    vprintf(fmt, args);
+    va_end(args);
+
+    printf("\n");
+
+    FILE* file = fopen("vrmod_log.txt", "a");
+    if (file)
+    {
+        fprintf(file, "[%s] ", timebuf);
+        va_list args2;
+        va_start(args2, fmt);
+        vfprintf(file, fmt, args2);
+        va_end(args2);
+        fprintf(file, "\n");
+        fclose(file);
+    }
 }
 
-CBaseEntity *Game::GetClientEntity(int entityIndex)
+// === Error Message ===
+void Game::errorMsg(const char* msg)
 {
-    return (CBaseEntity *)(m_ClientEntityList->GetClientEntity(entityIndex));
+    logMsg("[ERROR] %s", msg);
+    MessageBoxA(nullptr, msg, "L4D2VR Error", MB_ICONERROR | MB_OK);
 }
 
-char *Game::getNetworkName(uintptr_t *entity)
+// === Entity Access ===
+CBaseEntity* Game::GetClientEntity(int entityIndex)
 {
-    uintptr_t *IClientNetworkableVtable = (uintptr_t *)*(entity + 0x8);
-    uintptr_t *GetClientClassPtr = (uintptr_t *)*(IClientNetworkableVtable + 0x8);
-    uintptr_t *ClientClassPtr = (uintptr_t *)*(GetClientClassPtr + 0x1);
-    char *m_pNetworkName = (char *)*(ClientClassPtr + 0x8);
-    int classID = (int)*(ClientClassPtr + 0x10);
-    std::cout << "ClassID: " << classID << std::endl;
-    return m_pNetworkName;
+    if (!m_ClientEntityList)
+        return nullptr;
+
+    return static_cast<CBaseEntity*>(m_ClientEntityList->GetClientEntity(entityIndex));
 }
 
-void Game::ClientCmd(const char *szCmdString)
+// === Network Name Utility ===
+char* Game::getNetworkName(uintptr_t* entity)
 {
-    m_EngineClient->ClientCmd(szCmdString);
+    if (!entity)
+        return nullptr;
+
+    uintptr_t* vtable = reinterpret_cast<uintptr_t*>(*(entity + 0x8));
+    if (!vtable)
+        return nullptr;
+
+    uintptr_t* getClientClassFn = reinterpret_cast<uintptr_t*>(*(vtable + 0x8));
+    if (!getClientClassFn)
+        return nullptr;
+
+    uintptr_t* clientClass = reinterpret_cast<uintptr_t*>(*(getClientClassFn + 0x1));
+    if (!clientClass)
+        return nullptr;
+
+    char* name = reinterpret_cast<char*>(*(clientClass + 0x8));
+    int classID = static_cast<int>(*(clientClass + 0x10));
+
+    Game::logMsg("[NetworkClass] ID: %d, Name: %s", classID, name ? name : "nullptr");
+    return name;
 }
 
-void Game::ClientCmd_Unrestricted(const char *szCmdString)
+// === Commands ===
+void Game::ClientCmd(const char* szCmdString)
 {
-    m_EngineClient->ClientCmd_Unrestricted(szCmdString);
+    if (m_EngineClient)
+        m_EngineClient->ClientCmd(szCmdString);
 }
 
+void Game::ClientCmd_Unrestricted(const char* szCmdString)
+{
+    if (m_EngineClient)
+        m_EngineClient->ClientCmd_Unrestricted(szCmdString);
+}
 

@@ -1,100 +1,115 @@
 #pragma once
+
 #include <cstdint>
 #include <array>
+#include <string>
+#include <cstdarg>
+#include <Windows.h>
+
 #include "vector.h"
 
+// === Forward Declarations for Engine Interfaces ===
 class IClientEntityList;
 class IEngineTrace;
 class IEngineClient;
 class IMaterialSystem;
 class IBaseClientDLL;
-class IViewRender;
-class IViewRender;
-class CBaseEntity;
 class IModelInfo;
 class IModelRender;
 class IMaterial;
 class IInput;
 class ISurface;
+class CBaseEntity;
 class C_BasePlayer;
 struct model_t;
 
+// === Forward Declarations for Internal Systems ===
 class Game;
 class Offsets;
 class VR;
 class Hooks;
 
-inline Game *g_Game;
+// === Global Game Instance ===
+inline Game* g_Game = nullptr;
 
+// === Per-Player VR State ===
 struct Player
 {
-    C_BasePlayer *pPlayer;
-    bool isUsingVR;
-    QAngle controllerAngle;
-    Vector controllerPos;
-    bool isMeleeing;
-    bool isNewSwing;
-    QAngle prevControllerAngle;
+    C_BasePlayer* pPlayer = nullptr;
+    bool isUsingVR = false;
 
-    Player()
-        : isUsingVR(false),
-        controllerAngle({ 0,0,0 }),
-        controllerPos({ 0,0,0 }),
-        isMeleeing(false),
-        isNewSwing(false),
-        prevControllerAngle({ 0,0,0 })
-    {}
+    Vector controllerPos = { 0.f, 0.f, 0.f };
+    QAngle controllerAngle = { 0.f, 0.f, 0.f };
+    QAngle prevControllerAngle = { 0.f, 0.f, 0.f };
+
+    bool isMeleeing = false;
+    bool isNewSwing = false;
 };
 
-class Game 
+// === Main Game System ===
+class Game
 {
 public:
-    IClientEntityList *m_ClientEntityList = nullptr;
-    IEngineTrace *m_EngineTrace = nullptr;
-    IEngineClient *m_EngineClient = nullptr;
-    IMaterialSystem *m_MaterialSystem = nullptr;
-    IBaseClientDLL *m_BaseClientDll = nullptr;
-    IViewRender *m_ClientViewRender = nullptr;
-    IViewRender *m_EngineViewRender = nullptr;
-    IModelInfo *m_ModelInfo = nullptr;
-    IModelRender *m_ModelRender = nullptr;
-    IInput *m_VguiInput = nullptr;
-    ISurface *m_VguiSurface = nullptr;
+    // === Engine Interfaces ===
+    IClientEntityList* m_ClientEntityList = nullptr;
+    IEngineTrace* m_EngineTrace = nullptr;
+    IEngineClient* m_EngineClient = nullptr;
+    IMaterialSystem* m_MaterialSystem = nullptr;
+    IBaseClientDLL* m_BaseClientDll = nullptr;
+    IModelInfo* m_ModelInfo = nullptr;
+    IModelRender* m_ModelRender = nullptr;
+    IInput* m_VguiInput = nullptr;
+    ISurface* m_VguiSurface = nullptr;
 
-    uintptr_t m_BaseEngine;
-    uintptr_t m_BaseClient;
-    uintptr_t m_BaseServer;
-    uintptr_t m_BaseMaterialSystem;
-    uintptr_t m_BaseVgui2;
+    // === Module Base Addresses ===
+    uintptr_t m_BaseEngine = 0;
+    uintptr_t m_BaseClient = 0;
+    uintptr_t m_BaseServer = 0;
+    uintptr_t m_BaseMaterialSystem = 0;
+    uintptr_t m_BaseVgui2 = 0;
 
-    Offsets *m_Offsets = nullptr;
-    VR *m_VR = nullptr;
-    Hooks *m_Hooks = nullptr;
+    // === Internal Systems ===
+    Offsets* m_Offsets = nullptr;
+    VR* m_VR = nullptr;
+    Hooks* m_Hooks = nullptr;
 
+    // === State Flags ===
     bool m_Initialized = false;
-
-    std::array<Player, 24> m_PlayersVRInfo;
-    int m_CurrentUsercmdID = -1;
     bool m_PerformingMelee = false;
+    int m_CurrentUsercmdID = -1;
 
-    model_t *m_ArmsModel = nullptr;
-    IMaterial *m_ArmsMaterial = nullptr;
-    bool m_CachedArmsModel = false;
+    // === Player VR State (Multiplayer) ===
+    std::array<Player, 24> m_PlayersVRInfo;
 
+    // === Weapon / Viewmodel State ===
     bool m_IsMeleeWeaponActive = false;
     bool m_SwitchedWeapons = false;
+    model_t* m_ArmsModel = nullptr;
+    IMaterial* m_ArmsMaterial = nullptr;
+    bool m_CachedArmsModel = false;
 
+    // === Constructor ===
     Game();
 
-    void *GetInterface(const char *dllname, const char *interfacename);
+    // === Interface Utilities ===
+    void* GetInterface(const char* dllname, const char* interfacename);
+    CBaseEntity* GetClientEntity(int entityIndex);
+    char* getNetworkName(uintptr_t* entity);
 
-    static void errorMsg(const char *msg);
+    // === Command Execution ===
+    void ClientCmd(const char* szCmdString);
+    void ClientCmd_Unrestricted(const char* szCmdString);
 
-    CBaseEntity *GetClientEntity(int entityIndex);
-    char *getNetworkName(uintptr_t *entity);
-    void ClientCmd(const char *szCmdString);
-    void ClientCmd_Unrestricted(const char *szCmdString);
-
-    typedef void *(__cdecl *tCreateInterface)(const char *name, int *returnCode);
+    // === Logging ===
+    static void logMsg(const char* fmt, ...);
+    static void errorMsg(const char* msg);
 };
 
+// === Logging Macros (Debug Only) ===
+#ifdef _DEBUG
+#define LOG(fmt, ...) Game::logMsg("[LOG] " fmt, ##__VA_ARGS__)
+#define ERR(msg) Game::errorMsg("[ERROR] " msg)
+#else
+#define LOG(fmt, ...)
+#define ERR(msg)
+#endif
