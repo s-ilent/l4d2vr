@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <chrono>
 #include <ctime>
+#include <mutex>
 
 #include "sdk.h"
 #include "vr.h"
@@ -13,6 +14,7 @@
 #include "offsets.h"
 #include "sigscanner.h"
 
+static std::mutex logMutex;
 using tCreateInterface = void* (__cdecl*)(const char* name, int* returnCode);
 
 // === Utility: Retry module load with logging ===
@@ -102,6 +104,8 @@ void* Game::GetInterface(const char* dllname, const char* interfacename)
 // === Thread-safe Log Message with Timestamp ===
 void Game::logMsg(const char* fmt, ...)
 {
+    std::lock_guard<std::mutex> lock(logMutex);
+
     auto now = std::chrono::system_clock::now();
     std::time_t now_c = std::chrono::system_clock::to_time_t(now);
     char timebuf[20] = {};
