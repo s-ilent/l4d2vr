@@ -578,55 +578,6 @@ void VR::ProcessInput()
         m_RotationOffset -= 360 * std::floor(m_RotationOffset / 360);
     }
 
-    // TODO: Instead of ClientCmding, override Usercmd in CreateMove
-    if (GetAnalogActionData(m_ActionWalk, analogActionData))		
-    {
-        bool pushingStickX = true;
-        bool pushingStickY = true;
-        if (analogActionData.y > 0.5)	
-        {
-            m_Game->ClientCmd_Unrestricted("-back");
-            m_Game->ClientCmd_Unrestricted("+forward");
-        }
-        else if (analogActionData.y < -0.5)		
-        {
-            m_Game->ClientCmd_Unrestricted("-forward");
-            m_Game->ClientCmd_Unrestricted("+back");
-        }
-        else
-        {
-            m_Game->ClientCmd_Unrestricted("-back");
-            m_Game->ClientCmd_Unrestricted("-forward");
-            pushingStickY = false;
-        }
-
-        if (analogActionData.x > 0.5)		
-        {
-            m_Game->ClientCmd_Unrestricted("-moveleft");
-            m_Game->ClientCmd_Unrestricted("+moveright");
-        }
-        else if (analogActionData.x < -0.5)		
-        {
-            m_Game->ClientCmd_Unrestricted("-moveright");
-            m_Game->ClientCmd_Unrestricted("+moveleft");
-        }
-        else
-        {
-            m_Game->ClientCmd_Unrestricted("-moveright");
-            m_Game->ClientCmd_Unrestricted("-moveleft");
-            pushingStickX = false;
-        }
-
-        m_PushingThumbstick = pushingStickX || pushingStickY;
-    }
-    else
-    {
-        m_Game->ClientCmd_Unrestricted("-forward");
-        m_Game->ClientCmd_Unrestricted("-back");
-        m_Game->ClientCmd_Unrestricted("-moveleft");
-        m_Game->ClientCmd_Unrestricted("-moveright");
-    }
-
     if (PressedDigitalAction(m_ActionPrimaryAttack))
     {
         m_Game->ClientCmd_Unrestricted("+attack");

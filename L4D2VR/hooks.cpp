@@ -3,6 +3,7 @@
 #include "texture.h"
 #include "sdk.h"
 #include "sdk_server.h"
+#include "in_buttons.h"
 #include "vr.h"
 #include "offsets.h"
 #include <iostream>
@@ -213,13 +214,46 @@ bool __fastcall Hooks::dCreateMove(void *ecx, void *edx, float flInputSampleTime
 	if (!cmd->command_number)
 		return hkCreateMove.fOriginal(ecx, flInputSampleTime, cmd);
 
-	if (m_VR->m_IsVREnabled && m_VR->m_RoomscaleActive)
+	if (!g_Game || !m_VR || !m_VR->m_IsVREnabled)
+	{
+		return false;
+	}
+
+	vr::InputAnalogActionData_t analogActionData;
+	memset(&analogActionData, 0, sizeof(analogActionData));
+	m_VR->GetAnalogActionData(m_VR->m_ActionWalk, analogActionData);
+
+	float forwardValue = analogActionData.y;
+	float sideValue = analogActionData.x;
+
+	const float fMaxSpeed = 450.0f;
+
+	cmd->forwardmove += forwardValue * fMaxSpeed;
+	cmd->sidemove += sideValue * fMaxSpeed;
+
+	const float fStickDeadzone = 0.2f;
+	if (forwardValue > fStickDeadzone) {
+		cmd->buttons |= IN_FORWARD;
+	}
+	else if (forwardValue < -fStickDeadzone) {
+		cmd->buttons |= IN_BACK;
+	}
+
+	if (sideValue > fStickDeadzone) {
+		cmd->buttons |= IN_MOVERIGHT;
+	}
+	else if (sideValue < -fStickDeadzone) {
+		cmd->buttons |= IN_MOVELEFT;
+	}
+
+	m_VR->m_PushingThumbstick = (fabs(analogActionData.x) > 0.1f || fabs(analogActionData.y) > 0.1f);
+
+	if (m_VR->m_RoomscaleActive)
 	{
 		Vector setupOriginToHMD = m_VR->m_SetupOriginToHMD;
 		setupOriginToHMD.z = 0;
 		float distance = VectorLength(setupOriginToHMD);
-		if (distance > 1)
-		{
+		if (distance > 1) {
 			float forwardSpeed = DotProduct2D(setupOriginToHMD, m_VR->m_HmdForward);
 			float sideSpeed = DotProduct2D(setupOriginToHMD, m_VR->m_HmdRight);
 			cmd->forwardmove += distance * forwardSpeed;

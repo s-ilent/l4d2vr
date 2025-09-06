@@ -440,6 +440,7 @@
     <ClInclude Include="..\dxvk\tests\test_utils.h" />
     <ClInclude Include="game.h" />
     <ClInclude Include="hooks.h" />
+    <ClInclude Include="in_buttons.h" />
     <ClInclude Include="offsets.h" />
     <ClInclude Include="sdk\checksum_crc.h" />
     <ClInclude Include="sdk\sdk_server.h" />
